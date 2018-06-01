@@ -1,3 +1,0 @@
-main pthread==10
-child pthread==0
-finished!
