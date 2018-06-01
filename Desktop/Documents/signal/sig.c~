@@ -1,0 +1,24 @@
+#include<stdio.h>
+#include<string.h>
+#include<stdlib.h>
+#include<assert.h>
+#include<unistd.h>
+#include<signal.h>
+
+void fun(int sign)
+{
+	printf("start!");
+	sleep(10);
+	printf("end!");
+}
+
+int main()
+{
+	signal(SIGINT, fun);
+
+	while(1)
+	{
+		sleep(2);
+		printf("main running.\n");
+	}
+}
