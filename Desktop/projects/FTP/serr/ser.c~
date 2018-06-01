@@ -1,0 +1,244 @@
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <fcntl.h>
+
+#define LEN 128
+
+typedef enum 
+{
+	UP = 1,
+	DOWN,
+	CMD
+}Op;
+
+typedef struct
+{
+	Op option;
+	char data[LEN];  // ls -l    /  cd  ..  
+}Data;
+
+void UpFile(int c, Data val)
+{
+	int fd = open(val.data,O_WRONLY | O_CREAT | O_TRUNC, 0666);
+	if(fd == -1)
+	{
+		send(c, "ER", 2, 0);
+		return;
+	}
+
+			char recvbuff[LEN] = {0};
+			recv(c,recvbuff,LEN-1,0);//ER   OK#1000#this is//接受客户端的文件数据
+
+			char *p = strtok(recvbuff,"#");
+			p = strtok(NULL,"#");//得到文件大小,计算百分比
+
+			int size = 0,count = 0;
+			sscanf(p,"%d",&size);
+			if(p != NULL)
+			{
+				p = strtok(NULL,"\0"); //得到文件内容
+			}
+			if(p != NULL)
+			{
+				 count = strlen(p);
+				write(fd,p,count);
+			}
+
+			printf("\033[?25l");//隐藏光标
+			while(1)
+			{
+				printf("%.2f %%", count*1.0/size*100);
+				fflush(stdout);
+				printf("\033[100D\033[K");//清除光标到行尾的内容
+				memset(recvbuff, 0, LEN);
+
+				int n = recv(c,recvbuff,LEN-1,0);
+				write(fd,recvbuff,n);
+				count += n;
+
+				if(count == size)
+				{
+					close(fd);
+					break;
+				}
+			}
+
+			printf("\033[100D\033[K");
+			printf("100.00 %\n");
+			printf("\033[?25h");//恢复光标
+}
+void DownFile(int c, Data val) // val:  filename
+{
+	int fd = open(val.data, O_RDONLY);
+	if(fd == -1)
+	{
+		send(c, "ER", 2, 0);
+		return;
+	}
+
+	struct stat st;
+	fstat(fd, &st);
+	char buff[128] = "OK#";
+	sprintf(buff+3, "%d", st.st_size);
+	strcat(buff, "#");
+	send(c, buff, strlen(buff), 0);
+	while(1)
+	{
+		memset(buff, 0, 128);
+		int n = read(fd, buff, 127);
+		if(n == 0)
+		{
+			close(fd);
+			break;
+		}
+
+		send(c, buff, n, 0);
+	}
+}
+void ExecuteCmd(int c, Data val) //  ls   pwd   cd
+{
+	char buff[LEN] = {0};
+	strcpy(buff, val.data);
+
+	char *command[LEN] = {0};
+	int count = 0;
+	char *p = strtok(buff, " ");
+	while(p != NULL)
+	{
+		command[count++] = p;
+		p = strtok(NULL, " ");
+	}
+
+	if(strncmp(command[0], "cd", 2) == 0)
+	{
+		if(command[1] != NULL)
+		{
+			if(-1 == chdir(command[1]))
+			{
+				send(c, "ERR\n###", 7, 0);
+			}
+			else
+			{
+				send(c, "OK\n###", 6, 0);
+			}
+		}
+		else
+		{
+			send(c, "ERR\n###", 7, 0);
+		}
+	}
+	else
+	{
+		int fds[2];
+		pipe(fds);
+		pid_t n = fork();
+		assert(n != -1);
+		if(n == 0)
+		{
+			close(fds[0]);
+			close(1);
+			close(2);
+			dup(fds[1]);
+			dup(fds[1]);
+			char path[LEN] = "/bin/";
+			strcat(path, command[0]);
+			execv(path, command);
+			perror(" ");
+			exit(0);
+		}
+		else
+		{
+			close(fds[1]);
+			while(1)
+			{
+				char data[LEN] = {0};
+				int n = read(fds[0], buff, LEN - 1);
+				if(n <= 0)
+				{
+					close(fds[0]);
+					send(c, "###", 3, 0);
+					break;
+				}
+
+				send(c, buff, n, 0);
+			}
+		}
+	}
+}
+
+void DisposeClient(int c) // 业务逻辑处理函数
+{
+	while(1)
+	{
+		Data val;
+		memset(&val, 0, sizeof(val));
+		int n = recv(c, &val, sizeof(val) - 1, 0);
+		if(n <= 0)
+		{
+			close(c);
+			break;
+		}
+
+		switch(val.option)
+		{
+			case UP:
+				{
+					UpFile(c, val);
+					break;
+				}
+			case DOWN:
+				{
+					DownFile(c, val);
+					break;
+				}
+			case CMD:
+				{
+					ExecuteCmd(c, val);
+					break;
+				}
+			default:
+				{
+					break;
+				}
+		}
+	}
+}
+
+void main()
+{
+	int listenfd = socket(AF_INET, SOCK_STREAM, 0);
+	assert(listenfd != -1);
+
+	struct sockaddr_in ser, cli;
+	memset(&ser, 0, sizeof(ser));
+	ser.sin_family = PF_INET;
+	ser.sin_port = htons(6500);
+	ser.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+	int res = bind(listenfd, (struct sockaddr*)&ser, sizeof(ser));
+	assert(res != -1);
+
+	listen(listenfd, 5);
+
+	while(1)
+	{
+		int len = sizeof(cli);
+		int linkfd = accept(listenfd, (struct sockaddr*)&cli, &len);
+		if(linkfd < 0)
+		{
+			printf("link fail\n");
+			continue;
+		}
+
+		DisposeClient(linkfd);
+	}
+
+	close(listenfd);
+}
