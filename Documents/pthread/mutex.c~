@@ -1,0 +1,51 @@
+#include<stdio.h>
+#include<string.h>
+#include<unistd.h>
+#include<stdlib.h>
+#include<assert.h>
+#include<semaphore.h>
+
+char buff[128]={0};
+pthread_t mutex;
+
+void *pthread_fun(void *arg)
+{
+	
+	while(1)
+	{
+		pthread_mutex_lock(&mutex);
+		if(strncmp(buff,"end",3)==0)
+		{
+			break;
+		}
+ 		printf("buff lenth:%d\n",strlen(buff)-1);
+		pthread_mutex_unlock(&mutex);
+		sleep(1);
+	}
+
+}
+
+void main()
+{
+	pthread_t id;
+	pthread_mutex_init(&mutex,NULL);
+	int res=pthread_create(&id,NULL,pthread_fun,NULL);
+	assert(res==0);
+
+	while(1)
+	{
+		pthread_mutex_lock(&mutex);
+		printf("please input:");
+		fflush(stdout);
+		fgets(buff,128,stdin);
+		pthread_mutex_unlock(&mutex);
+
+		if(strncmp(buff,"end",3)==0)
+		{
+			break;
+		}
+		sleep(3);//同一把锁加锁解锁需要时间。
+	}
+	char *p="hello";
+	pthread_join(id,&p);
+}

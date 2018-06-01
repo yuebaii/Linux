@@ -1,0 +1,69 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <assert.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>  
+#include <fcntl.h>
+#include <signal.h>    
+
+void fun(int sign)
+{
+	wait(NULL);
+}
+
+void main()
+{
+	signal(SIGCHLD, fun);
+	int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	assert(sockfd != -1);
+
+	struct sockaddr_in ser, cli;
+	memset(&ser, 0, sizeof(ser));
+	ser.sin_family = AF_INET;
+	ser.sin_port = htons(6500);
+	ser.sin_addr.s_addr = inet_addr("192.168.1.120");
+
+	int res = bind(sockfd, (struct sockaddr*)&ser, sizeof(ser));
+	assert(res != -1);
+
+	listen(sockfd, 5);
+
+	while(1)
+	{
+		int len = sizeof(cli);
+		int c = accept(sockfd, (struct sockaddr*)&cli, &len);
+		if(c <= 0)
+		{
+			printf("error\n");
+			continue;
+		}
+
+		pid_t n = fork();
+		assert(n != -1);
+		if(n == 0)
+		{
+			while(1)
+			{
+				char buff[128] = {0};
+				int n = recv(c, buff, 127, 0);
+				if(n < 0)
+				{
+					break;
+				}
+				printf("addr::%s   port::%d\n", 
+						inet_ntoa(cli.sin_addr), ntohs(cli.sin_port));
+				printf("%s\n", buff);
+				send(c, "OK", 2, 0);
+			}
+
+			printf("%d unlink\n", c);
+			close(c);
+			exit(0);
+		}
+
+		close(c);
+	}
+}

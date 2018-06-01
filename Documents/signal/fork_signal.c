@@ -1,0 +1,36 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <assert.h>
+#include <signal.h>
+
+void fun(int sign)
+{
+	printf("fun was called\n");
+	pid_t pid = wait(NULL);
+	printf("pid == %d\n", pid);
+	printf("fun over\n");
+}
+
+void main()
+{
+	pid_t pid = fork();
+	assert(pid != -1);
+
+	if(pid == 0)
+	{
+		printf("child start\n");
+		sleep(2);
+		printf("child end\n");
+		// 子进程结束时回向其父进程发送SIGCHLD
+		kill(getppid(), SIGCHLD);
+	}
+	else
+	{
+		signal(SIGCHLD, fun);
+		printf("father start\n");
+		sleep(100000);		
+		printf("father end\n");
+	}
+}
